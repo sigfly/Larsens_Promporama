@@ -17,13 +17,26 @@ body{overflow:hidden;font:15px system-ui,Arial,sans-serif}
 .frequency-label output{font-size:12px;font-variant-numeric:tabular-nums;color:#fff;letter-spacing:.02em}
 #audioHint{font-size:9px;font-weight:400;letter-spacing:.03em;color:#ccc}
 .frequency-ui input[type=range]{-webkit-appearance:none;appearance:none;display:block;width:100%;height:21px;margin:0;padding:0;border:0;border-radius:0;outline:0;cursor:pointer;background:transparent;touch-action:pan-x}
-.frequency-ui input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:0;background:linear-gradient(90deg,#efefef 0%,#efefef var(--progress,25.93%),#555 var(--progress,25.93%),#555 100%)}
+.frequency-ui input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:0;background:linear-gradient(90deg,#efefef 0%,#efefef var(--progress,7.407407%),#555 var(--progress,7.407407%),#555 100%)}
 .frequency-ui input[type=range]::-moz-range-track{height:3px;border-radius:0;background:#555}
 .frequency-ui input[type=range]::-moz-range-progress{height:3px;background:#efefef}
 .frequency-ui input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;margin-top:-4.5px;border-radius:50%;background:#f7f7f7;border:1px solid #aaa;box-shadow:0 0 0 2px rgba(0,0,0,.3)}
 .frequency-ui input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#f7f7f7;border:1px solid #aaa}
 .frequency-ui input[type=range]:focus-visible{outline:1px solid #bbb;outline-offset:3px}
 @media(max-width:600px){.frequency-ui{width:min(270px,74%);padding:8px 11px 9px}.frequency-label{margin-bottom:5px}.frequency-label label{font-size:9px}#audioHint{font-size:8px}}
+/* Only a fine scoreboard and unobtrusive start control accompany the photo. */
+.score-display{position:absolute;z-index:3;top:clamp(9px,2.2%,25px);left:50%;transform:translateX(-50%);pointer-events:none;
+  font:500 10px/1.3 system-ui,Arial,sans-serif;letter-spacing:.12em;color:#ededed;
+  text-shadow:0 1px 3px #000,0 0 8px #000;font-variant-numeric:tabular-nums}
+.start-overlay{position:absolute;z-index:5;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.start-overlay[hidden]{display:none!important}
+.start-button{pointer-events:auto;appearance:none;background:rgba(0,0,0,.78);color:#eee;
+  border:1px solid rgba(235,235,235,.65);border-radius:3px;padding:14px 26px;
+  font:500 12px/1.3 system-ui,Arial,sans-serif;letter-spacing:.1em;
+  box-shadow:0 2px 16px rgba(0,0,0,.45);cursor:pointer;touch-action:manipulation}
+.start-button:hover{background:rgba(30,30,30,.91);border-color:#f5f5f5}
+.start-button:focus-visible{outline:2px solid white;outline-offset:4px}
+@media(max-width:600px){.score-display{font-size:9px}.start-button{padding:12px 22px;font-size:11px}}
 /* Existing test interface remains available in a hidden developer panel, never in normal viewing mode. */
 #developerPanel[hidden]{display:none!important}
 #developerPanel{position:fixed;z-index:50;inset:0;overflow:auto;background:#101115;padding:20px;color:#ececef;font:15px system-ui,Arial,sans-serif}
@@ -48,9 +61,13 @@ body{overflow:hidden;font:15px system-ui,Arial,sans-serif}
 <main class="stage" id="stage">
   <div class="scene-frame" id="sceneFrame">
     <canvas id="view" width="1920" height="1080" aria-label="Svart-hvitt teaterscene med animasjon"></canvas>
+    <div class="score-display" id="fartScore" aria-label="Poeng, kvinne og mann" aria-live="polite">0-0</div>
+    <div class="start-overlay" id="startOverlay">
+      <button class="start-button" id="sceneStart" type="button">Promp ivei</button>
+    </div>
 <div class="frequency-ui" id="frequencyControl" aria-label="Prompefrekvens">
-  <div class="frequency-label"><label for="autoFartFreq">PROMPEFREKVENS<span id="audioHint"> · TRYKK FOR LYD</span></label><output for="autoFartFreq" id="autoFartFreqValue">20 s</output></div>
-  <input id="autoFartFreq" type="range" min="6" max="60" step="1" value="20" aria-label="Prompefrekvens fra 6 til 60 sekunder">
+  <div class="frequency-label"><label for="autoFartFreq">PROMPEFREKVENS</label><output for="autoFartFreq" id="autoFartFreqValue">10 s</output></div>
+  <input id="autoFartFreq" type="range" min="6" max="60" step="1" value="10" aria-label="Prompefrekvens fra 6 til 60 sekunder">
 </div>
   </div>
   <section id="developerPanel" hidden aria-label="Skjulte testfunksjoner">
@@ -278,9 +295,16 @@ function drawFarts(){
  }
 }
 function chooseRandomFartSound(){ return EMBEDDED_FART_AUDIO[Math.floor(Math.random()*EMBEDDED_FART_AUDIO.length)]; }
+const fartScores={woman:0,man:0};
+function increaseScore(which){
+ fartScores[which]++;
+ $('fartScore').textContent=`${fartScores.woman}-${fartScores.man}`;
+}
 async function playFartEvent(which, chosenSound=null){
+ if(!sceneStarted)return;
  const sound=chosenSound||chooseRandomFartSound();
  const cfg=fartControlMap[which];
+ increaseScore(which);
  setPose(cfg.pose);
  triggerFartCloud(which,sound.duration);
  fartAudio.pause(); fartAudio.src=sound.src; fartAudio.currentTime=0;
@@ -288,7 +312,7 @@ async function playFartEvent(which, chosenSound=null){
  playSpeechClip(cfg.speechClip);
  $('autoFartHint').textContent=`Last fart: ${cfg.label} — ${sound.file} (${sound.duration.toFixed(2)} s). Cloud duration follows the chosen sound.`;
 }
-let autoFartEnabled=false, nextAutoFartAt=0;
+let sceneStarted=false, autoFartEnabled=false, nextAutoFartAt=0;
 function updateAutoFartStatus(now){
  const interval=+$('autoFartFreq').value;
  if(!autoFartEnabled){ $('autoFartState').textContent='Random farting: off'; }
@@ -303,7 +327,12 @@ async function triggerRandomAutoFart(){
  await playFartEvent(which, chooseRandomFartSound());
  scheduleNextAutoFart();
 }
-function startAutoFarts(){ autoFartEnabled=true; scheduleNextAutoFart(); updateFartButtons(performance.now()/1000); }
+function startAutoFarts(){
+ if(!sceneStarted)return;
+ autoFartEnabled=true;
+ scheduleNextAutoFart();
+ updateFartButtons(performance.now()/1000);
+}
 function stopAutoFarts(){ autoFartEnabled=false; updateFartButtons(performance.now()/1000); updateAutoFartStatus(performance.now()/1000); }
 function updateAutoFarts(now){ if(autoFartEnabled && now>=nextAutoFartAt){ triggerRandomAutoFart().catch(console.error); scheduleNextAutoFart(); } updateAutoFartStatus(now); }
 
@@ -354,23 +383,20 @@ $('fartManBtn').onclick=()=>playFartEvent('man').catch(console.error);
 $('autoFartStart').onclick=()=>startAutoFarts();
 $('autoFartStop').onclick=()=>stopAutoFarts();
 $('fartStopBtn').onclick=()=>stopAllFarts();
-// The scene itself is the single audio-start surface. After one tap, automatic events run without further input.
-let performanceActivated=false;
-function activateScene(){
- if(performanceActivated)return;
- performanceActivated=true;
- $('audioHint').hidden=true;
- // Under Android/Chrome a genuine user gesture unlocks subsequent HTML audio playback.
+// The user starts the scene with a real button click. This grants the
+// browser a user gesture for sound; before it, the timer and audio are idle.
+$('sceneStart').addEventListener('click',()=>{
+ if(sceneStarted)return;
+ sceneStarted=true;
+ $('startOverlay').hidden=true;
  startAutoFarts();
-}
-$('sceneFrame').addEventListener('pointerdown',activateScene,{passive:true});
-$('autoFartFreq').addEventListener('keydown',activateScene);
-$('autoFartFreq').addEventListener('input',activateScene);
+ updateAutoFartStatus(performance.now()/1000);
+});
 // Ctrl+Shift+D optionally reveals all retained test controls; Escape hides them again.
 document.addEventListener('keydown',e=>{
  if(e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==='d'){$('developerPanel').hidden=!$('developerPanel').hidden;e.preventDefault();}
  if(e.key==='Escape')$('developerPanel').hidden=true;
 });
-settings(); updateAutoFartStatus(performance.now()/1000); updateFartButtons(performance.now()/1000); requestAnimationFrame(draw);
+settings(); updateAutoFartStatus(performance.now()/1000); requestAnimationFrame(draw);
 </script>
 </body></html>
