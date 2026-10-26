@@ -175,6 +175,94 @@ const EMBEDDED_WOMAN_MOUTHS = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAD
 const canvas=document.getElementById('view'),ctx=canvas.getContext('2d');
 const voice=document.getElementById('voice');
 const fartAudio=document.getElementById('fartAudio');
+// Web Audio uses one shared clock for BOTH sounds, the lips and fart clouds.
+// The old HTML <audio> elements remain for developer controls / compatibility.
+const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+let audioEngine=null, audioBuffersPromise=null, audioBuffers=null, audioEngineError=null;
+let audioPlaybackToken=0, scheduledFartVisual=null, speechAudioStartAt=null;
+let activeAudioSources=[];
+function getAudioEngine(){
+ if(!AudioContextClass)throw new Error('Web Audio is not supported on this browser');
+ if(!audioEngine)audioEngine=new AudioContextClass({latencyHint:'interactive'});
+ return audioEngine;
+}
+function wavDataToBytes(uri){
+ const base64=uri.substring(uri.indexOf(',')+1);
+ const binary=atob(base64);
+ const bytes=new Uint8Array(binary.length);
+ for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+ return bytes.buffer;
+}
+function prepareAudioBuffers(){
+ if(audioBuffersPromise)return audioBuffersPromise;
+ try{
+  const engine=getAudioEngine();
+  audioBuffersPromise=(async()=>{
+   // All 19 clips plus the two original voice clips decoded just once.
+   const items=await Promise.all([
+    ...EMBEDDED_FART_AUDIO.map(x=>engine.decodeAudioData(wavDataToBytes(x.src))),
+    ...EMBEDDED_AUDIO.map(x=>engine.decodeAudioData(wavDataToBytes(x)))
+   ]);
+   audioBuffers={farts:items.slice(0,EMBEDDED_FART_AUDIO.length),speech:items.slice(EMBEDDED_FART_AUDIO.length)};
+   return audioBuffers;
+  })();
+ }catch(e){audioEngineError=e;audioBuffersPromise=Promise.reject(e);}
+ audioBuffersPromise.catch(e=>{audioEngineError=e;console.warn('Audio decoding unavailable, using compatible fallback:',e)});
+ return audioBuffersPromise;
+}
+function unlockAudioOnUserClick(){
+ // IMPORTANT: resume directly inside the 'Promp ivei' click handler.
+ // Android Chrome otherwise may suspend sound until another touch.
+ try{
+  const engine=getAudioEngine();
+  const resume=engine.resume();
+  if(resume&&resume.catch)resume.catch(e=>{audioEngineError=e;console.warn('Web Audio resume:',e)});
+  prepareAudioBuffers();
+ }catch(e){audioEngineError=e;console.warn('Falling back to HTML audio:',e)}
+}
+function audibleAudioTime(){
+ if(!audioEngine||audioEngine.state!=='running')return -Infinity;
+ if(typeof audioEngine.getOutputTimestamp==='function'){
+  const ts=audioEngine.getOutputTimestamp();
+  if(ts && Number.isFinite(ts.contextTime) && Number.isFinite(ts.performanceTime)
+     && ts.performanceTime>0 && Math.abs(ts.performanceTime-performance.now())<3000){
+   return ts.contextTime+(performance.now()-ts.performanceTime)/1000;
+  }
+ }
+ // Older mobile browsers: approximate when audio reaches the speakers.
+ return Math.max(0,audioEngine.currentTime-(audioEngine.baseLatency||0)-(audioEngine.outputLatency||0));
+}
+function stopWebAudioPair(){
+ audioPlaybackToken++;
+ for(const source of activeAudioSources){try{source.stop()}catch(e){}}
+ activeAudioSources=[];
+ scheduledFartVisual=null;
+ speechAudioStartAt=null;
+}
+function currentSpeechPlaybackTime(){
+ return speechAudioStartAt===null ? voice.currentTime : Math.max(0,audibleAudioTime()-speechAudioStartAt);
+}
+function activateScheduledVisual(now){
+ const pending=scheduledFartVisual;
+ if(!pending)return;
+ if(audibleAudioTime()+0.001<pending.audioStart)return;
+ scheduledFartVisual=null;
+ // Pose, score and the first cloud now begin with the audible fart,
+ // not with the JavaScript request to start playing a clip.
+ increaseScore(pending.which);
+ setPose(fartControlMap[pending.which].pose);
+ currentSpeech=fartControlMap[pending.which].speechClip;
+ speechAudioStartAt=pending.audioStart;
+ setSpeechButtonsActive(currentSpeech);
+ triggerFartCloud(pending.which,pending.duration,now);
+}
+async function waitForAudibleEnd(targetTime,token,duration){
+ const deadline=performance.now()+(duration+4)*1000;
+ while(token===audioPlaybackToken && performance.now()<deadline){
+  if(audibleAudioTime()>=targetTime)return;
+  await new Promise(resolve=>setTimeout(resolve,20));
+ }
+}
 const forwardImage=new Image(),turnedImage=new Image();
 function updateStatus(){
  const el=document.getElementById('loadStatus');
@@ -245,11 +333,12 @@ function square(){
 }
 function setSpeechButtonsActive(idx){ speechButtons.forEach((q,i)=>q.classList.toggle('active',i===idx)); }
 async function playSpeechClip(k){
+ stopWebAudioPair();
  voice.pause(); currentSpeech=k; voice.src=EMBEDDED_AUDIO[k]; voice.currentTime=0;
  try{ await voice.play(); }catch(e){ console.error('Speech playback failed:',e); }
  setSpeechButtonsActive(k);
 }
-function stopSpeech(){ voice.pause(); voice.currentTime=0; currentSpeech=-1; setSpeechButtonsActive(-1); }
+function stopSpeech(){ stopWebAudioPair(); voice.pause(); voice.currentTime=0; currentSpeech=-1; setSpeechButtonsActive(-1); }
 
 function spawnFartPuff(which,bias=1){
  const st=fartState[which], s=readFartSettings(which), dir=s.dir;
@@ -261,8 +350,8 @@ function spawnFartPuff(which,bias=1){
   blobs:Array.from({length:4+Math.floor(Math.random()*3)},()=>({dx:rand(-0.75,0.75),dy:rand(-0.55,0.55),scale:rand(0.45,0.95)}))
  });
 }
-function triggerFartCloud(which,duration){
- const st=fartState[which], now=performance.now()/1000;
+function triggerFartCloud(which,duration,now=performance.now()/1000){
+ const st=fartState[which];
  st.activeUntil=now+duration; st.lastSpawn=now-0.12;
  for(let i=0;i<3;i++)spawnFartPuff(which,1.1-i*0.12);
  updateFartButtons(now);
@@ -270,6 +359,7 @@ function triggerFartCloud(which,duration){
 function stopAllFarts(){
  for(const which of Object.keys(fartState)){ fartState[which].activeUntil=0; fartState[which].puffs=[]; }
  fartAudio.pause(); fartAudio.currentTime=0;
+ stopWebAudioPair();
  updateFartButtons(performance.now()/1000);
 }
 function updateFartButtons(now){
@@ -278,6 +368,7 @@ function updateFartButtons(now){
  $('autoFartStop').classList.toggle('active',!autoFartEnabled?false:false);
 }
 function updateFarts(now,dt){
+ activateScheduledVisual(now);
  for(const which of Object.keys(fartState)){
   const st=fartState[which], s=readFartSettings(which), interval=Math.max(0.045,0.12/Math.max(0.6,s.rate));
   if(now<st.activeUntil){ while(st.lastSpawn+interval<=now){ st.lastSpawn+=interval; spawnFartPuff(which,rand(0.8,1.15)); } }
@@ -352,16 +443,72 @@ async function playFartEvent(which, chosenSound=null){
  if(!sceneStarted)return;
  const sound=chosenSound||chooseRandomFartSound();
  const cfg=fartControlMap[which];
- increaseScore(which);
- setPose(cfg.pose);
- triggerFartCloud(which,sound.duration);
- currentSpeech=cfg.speechClip;
- setSpeechButtonsActive(cfg.speechClip);
- // Start the fart and Larsen's answer together, then await BOTH endings.
- const fartFinished=playMediaThrough(fartAudio,sound.src,sound.duration);
- const speechFinished=playMediaThrough(voice,EMBEDDED_AUDIO[cfg.speechClip],clips[cfg.speechClip].duration);
  $('autoFartHint').textContent=`Last fart: ${cfg.label} — ${sound.file} (${sound.duration.toFixed(2)} s). Cloud duration follows the chosen sound.`;
- await Promise.all([fartFinished,speechFinished]);
+ try{
+  const buffers=await prepareAudioBuffers();
+  const engine=getAudioEngine();
+  if(engine.state!=='running')await engine.resume();
+  if(engine.state!=='running')throw new Error('Audio engine is not running');
+  const index=EMBEDDED_FART_AUDIO.indexOf(sound);
+  if(index<0)throw new Error('Unrecognized fart sound');
+  // Kill any prior pair if the developer controls interrupted the show.
+  stopWebAudioPair();
+  voice.pause();
+  fartAudio.pause();
+  currentSpeech=-1;
+  setSpeechButtonsActive(-1);
+  const token=audioPlaybackToken;
+  const fartSource=engine.createBufferSource();
+  const speechSource=engine.createBufferSource();
+  fartSource.buffer=buffers.farts[index];
+  speechSource.buffer=buffers.speech[cfg.speechClip];
+  fartSource.connect(engine.destination);
+  speechSource.connect(engine.destination);
+  activeAudioSources=[fartSource,speechSource];
+  // A short look-ahead provides the browser time to queue audio reliably.
+  // Both clips share this EXACT start time on the Web Audio clock.
+  const startAt=engine.currentTime+0.16;
+  const fartDuration=fartSource.buffer.duration;
+  const pairDuration=Math.max(fartDuration,speechSource.buffer.duration);
+  scheduledFartVisual={which,audioStart:startAt,duration:fartDuration,token};
+  // No clouds or pose switch happen here: that is done once sound reaches
+  // the output device (via getOutputTimestamp) inside the animation loop.
+  fartSource.start(startAt);
+  speechSource.start(startAt);
+  await waitForAudibleEnd(startAt+pairDuration,token,pairDuration+0.16);
+  if(token===audioPlaybackToken){
+   // Guarantee a visual update if the tab briefly missed animation frames.
+   activateScheduledVisual(performance.now()/1000);
+   currentSpeech=-1;
+   speechAudioStartAt=null;
+   setSpeechButtonsActive(-1);
+   activeAudioSources=[];
+  }
+  return;
+ }catch(e){
+  console.warn('Web Audio unavailable for this event; using HTML audio:',e);
+  stopWebAudioPair();
+  // Compatible fallback: wait for the audio element to actually enter
+  // the playing state BEFORE displaying the first cloud.
+  let fired=false;
+  const startFallbackVisual=()=>{
+   if(fired)return;
+   fired=true;
+   increaseScore(which);
+   setPose(cfg.pose);
+   triggerFartCloud(which,sound.duration);
+   currentSpeech=cfg.speechClip;
+   setSpeechButtonsActive(cfg.speechClip);
+  };
+  fartAudio.addEventListener('playing',startFallbackVisual,{once:true});
+  const fartFinished=playMediaThrough(fartAudio,sound.src,sound.duration);
+  const speechFinished=playMediaThrough(voice,EMBEDDED_AUDIO[cfg.speechClip],clips[cfg.speechClip].duration);
+  await Promise.all([fartFinished,speechFinished]);
+  fartAudio.removeEventListener('playing',startFallbackVisual);
+  if(!fired)startFallbackVisual();
+  currentSpeech=-1;
+  setSpeechButtonsActive(-1);
+ }
 }
 function updateAutoFartStatus(now){
  const interval=+$('autoFartFreq').value;
@@ -422,8 +569,8 @@ function draw(){
  }
  drawFarts();
  const o=settings();
- if(currentSpeech>=0&&!voice.ended&&voice.currentTime>0){
-  const clip=clips[currentSpeech], t=voice.currentTime-o.delay, fi=Math.floor(t*clip.fps), idx=fi>=0&&fi<clip.poses.length?clip.poses[fi]:-1;
+ if(currentSpeech>=0&&(speechAudioStartAt!==null||(!voice.ended&&voice.currentTime>0))){
+  const clip=clips[currentSpeech], t=currentSpeechPlaybackTime()-o.delay, fi=Math.floor(t*clip.fps), idx=fi>=0&&fi<clip.poses.length?clip.poses[fi]:-1;
   if(idx>=0){
    const sc=o.w/15;
    if(pose==='front'){
@@ -471,6 +618,7 @@ window.setTimeout(()=>{
 startButton.addEventListener('click',()=>{
  if(sceneStarted||startButton.disabled)return;
  sceneStarted=true;
+ unlockAudioOnUserClick();
  $('startOverlay').hidden=true;
  startAutoFarts();
  updateAutoFartStatus(performance.now()/1000);
@@ -480,6 +628,7 @@ document.addEventListener('keydown',e=>{
  if(e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==='d'){$('developerPanel').hidden=!$('developerPanel').hidden;e.preventDefault();}
  if(e.key==='Escape')$('developerPanel').hidden=true;
 });
+prepareAudioBuffers().catch(()=>{});
 settings(); updateAutoFartStatus(performance.now()/1000); requestAnimationFrame(draw);
 </script>
 </body></html>
