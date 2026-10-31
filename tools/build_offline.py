@@ -16,7 +16,7 @@ def build():
     html = (ROOT / 'index.html').read_text(encoding='utf-8')
     css = (ROOT / 'styles/scene.css').read_text(encoding='utf-8')
     css = re.sub(r'(?:\.\./)?assets/[\w/.-]+', embed_asset, css)
-    html = html.replace('<link rel="stylesheet" href="styles/scene.css">', '<style>\n' + css + '\n</style>')
+    html = html.replace('<link rel="stylesheet" href="styles/scene.css?v=curtain-2">', '<style>\n' + css + '\n</style>')
     for name in ('media', 'scene'):
         js = (ROOT / f'scripts/{name}.js').read_text(encoding='utf-8')
         js = re.sub(r'assets/[\w/.-]+', embed_asset, js)
