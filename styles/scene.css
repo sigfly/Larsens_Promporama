@@ -39,8 +39,8 @@ body{overflow:hidden;font:15px system-ui,Arial,sans-serif}
 .theatre-curtain.opening{background:transparent;pointer-events:none}
 .theatre-curtain .curtain-half{position:relative;flex:0 0 50%;height:100%;background-position:center center;background-repeat:no-repeat;background-size:100% 100%;
   will-change:transform;transition:transform 2.8s cubic-bezier(.55,.02,.47,.99)}
-.theatre-curtain .curtain-left{background-image:url(assets/images/asset-001.jpg);box-shadow:10px 0 27px rgba(0,0,0,.75)}
-.theatre-curtain .curtain-right{background-image:url(assets/images/asset-002.jpg);box-shadow:-10px 0 27px rgba(0,0,0,.75)}
+.theatre-curtain .curtain-left{background-image:url(../assets/images/asset-001.jpg);box-shadow:10px 0 27px rgba(0,0,0,.75)}
+.theatre-curtain .curtain-right{background-image:url(../assets/images/asset-002.jpg);box-shadow:-10px 0 27px rgba(0,0,0,.75)}
 .theatre-curtain .curtain-left::after,.theatre-curtain .curtain-right::after{content:"";position:absolute;inset:0;pointer-events:none;
   background:linear-gradient(90deg,rgba(0,0,0,.2),transparent 18%,transparent 75%,rgba(0,0,0,.32))}
 .theatre-curtain.opening .curtain-left{transform:translateX(-105%)}
