@@ -49,4 +49,8 @@ run(fs.readFileSync(path.join(root,'scripts/scene.js'),'utf8'));
  for(const match of (html+fs.readFileSync(path.join(root,'scripts/media.js'),'utf8')).matchAll(/(?:assets|scripts|styles)\/[\w/.-]+/g))
   assert.ok(fs.existsSync(path.join(root,match[0])),match[0]);
  console.log('PASS: local source and media references exist');
+ const css=fs.readFileSync(path.join(root,'styles/scene.css'),'utf8');
+ for(const match of css.matchAll(/url\(["']?([^\s)"']+)/g))
+  assert.ok(fs.existsSync(path.resolve(root,'styles',match[1])),match[1]);
+ console.log('PASS: CSS image paths resolve relative to the stylesheet');
 })().catch(error=>{console.error(error);process.exitCode=1});
